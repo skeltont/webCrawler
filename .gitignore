@@ -1,0 +1,5 @@
+# local python environment
+venv
+
+# local vscode settings
+.vscode
