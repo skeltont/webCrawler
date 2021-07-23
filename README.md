@@ -20,7 +20,7 @@ OPTIONS:
     --verbose:
         usage: `python3.8 crawler.py --verbose <URL>`
         default: False
-        desc: print out additional logging information, like skipped href values
+        desc: print out additional logging information, like thread ident
     --max_depth:
         usage: `python3.8 crawler.py --max_depth 3 <URL>`
         default: 2

@@ -11,15 +11,10 @@ import requests
 
 from bs4 import BeautifulSoup
 
-# globals for now, going to be converting this to a class.
-MAX_THREADS = 3
-VERBOSE = False
-VISITED_PAGES = defaultdict(bool)
-
 class CrawlerURLError(Exception):
     '''custom exception class for when a supposed URL doesn't meet our
-    validation criteria.'''
-
+    validation criteria.
+    '''
 
 def validate_url(url):
     '''validate a URL's structure to have a leading http:// or https:// at a
@@ -30,6 +25,7 @@ def validate_url(url):
     Raises:
         (CrawlerURLError): The url provided is of an invalid structure.
     '''
+
     if not isinstance(url, str):
         raise CrawlerURLError(f"{url} is of invalid type.")
 
@@ -37,100 +33,128 @@ def validate_url(url):
         raise CrawlerURLError(f"{url} is of invalid format.")
 
 
-def print_urls(urls, depth=0, ident=None):
-    '''write the urls we've found in the neatest way possible
-
-    Params:
-        urls ([str]): the URL specified to navigate to.
+class Crawler:
+    '''crawler class for keeping track of important user-provided specifics
+    on how to run the program and the data collected thus far.
     '''
 
-    for url in urls:
-        if VERBOSE:
+    def __init__(self, max_threads=3, max_depth=2, verbose=False):
+        self.max_threads = max_threads
+        self.max_depth = max_depth
+        self.verbose = verbose
+
+        self.urls = list()
+        self.visited_pages = defaultdict(bool)
+
+    def print_url(self, url, depth=0, ident=None):
+        '''write the urls we've found in the neatest way possible
+
+        Params:
+            urls ([str]): the URL specified to navigate to.
+        '''
+
+
+        if self.verbose:
             # log the identifier of the thread to prove that multiple threads
             # are doing work.
             print("\t"*depth, ident, url)
-            continue
+            return
 
         print("\t"*depth, url)
 
 
-def discover_urls(url):
-    '''navigate to a specified page and collect all of the links found within
+    def discover_urls(self, url, depth=0):
+        '''navigate to a specified page and collect all of the links found
+        within
 
-    Params:
-        url (str): the URL specified to navigate to.
-    '''
+        Params:
+            url (str): the URL specified to navigate to.
+        Returns:
+            links [(str)]: new URLs that we found on this particular page.
+        '''
 
-    # this is a broad catch, but a number of things can happen here and I don't
-    # think I want to spend time narrowing them all down
-    try:
-        resp = requests.get(url)
-    except Exception as err: # pylint: disable=broad-except
-        if VERBOSE:
-            print(f'failed to fetch {url}: {err}')
-        return []
-
-    soup = BeautifulSoup(resp.text, 'html.parser')
-
-    links = list()
-    for link in soup.find_all('a'):
+        # this is a broad catch, but a number of things can happen here and
+        # I don't think I want to spend time narrowing them all down.
         try:
-            potential_link = link.get('href')
-            if VISITED_PAGES[potential_link]:
+            resp = requests.get(url)
+        except Exception as err: # pylint: disable=broad-except
+            if self.verbose:
+                print(f'failed to fetch {url}: {err}')
+            return []
+
+        # use beautifulsoup to parse the html
+        soup = BeautifulSoup(resp.text, 'html.parser')
+
+        # iterate over every <a> element found in the html response,
+        # make sure we haven't seen it before and validate it's structure.
+        links = list()
+        for link in soup.find_all('a'):
+            try:
+                potential_link = link.get('href')
+                if self.visited_pages[potential_link]:
+                    continue
+
+                validate_url(potential_link)
+            except CrawlerURLError as err:
                 continue
 
-            validate_url(potential_link)
-        except CrawlerURLError as err:
-            if VERBOSE:
-                print(err, '... skipping.')
-            continue
+            # add to our list of urls to parse and keep track that we've seen
+            # it so we maybe can avoid some loops.
+            links.append(potential_link)
+            self.visited_pages[potential_link] = True
+            self.print_url(potential_link, depth, threading.get_ident())
 
-        # add to our list of urls to parse and keep track that we've seen it
-        # so we maybe can avoid some loops.
-        links.append(potential_link)
-        VISITED_PAGES[potential_link] = True
+        return links
 
-    return links
+    def multithread_discover_urls(self, urls):
+        '''manage multiple threads that are all parsing pages found at
+        different URLs via a queue and continue to find them until there are
+        no more threads.
+
+        Params:
+            urls ([str]): the URL specified to navigate to.
+        '''
+
+        # build a queue for all the urls that the threads can subscribe to
+        # and determine when work is really done for that set of URLs.
+        url_queue = queue.Queue()
+
+        results = list()
+
+        # worker function that describes each thread's job: pop a url off the
+        # queue, discover new urls, and extend the result set shared by
+        # all threads.
+        def worker():
+            while True:
+                (url, depth) = url_queue.get()
+                results.extend(self.discover_urls(url, depth))
+                url_queue.task_done()
+
+        # spin up a number of threads equal to user input or default max_threads
+        for _ in range(self.max_threads):
+            threading.Thread(target=worker, daemon=True).start()
+
+        # while urls is populated or the max_depth hasn't been reached
+        depth = 0
+        while urls and depth < self.max_depth:
+            for _ in urls:
+                url = urls.pop()
+                url_queue.put((url, depth))
+
+            # wait for the threads we have running to finish their work and
+            # extend the urls we are going to hit next.
+            url_queue.join()
+
+            urls.extend(results)
+
+            # reset results and increment the depth
+            results = []
+            depth += 1
 
 
-def multithread_discover_urls(urls):
-    '''manage multiple threads that are all parsing pages found at different
-    URLs via a queue and continue to find them until there are no more threads.
-
-    Params:
-        urls ([str]): the URL specified to navigate to.
-    '''
-
-    url_queue = queue.Queue()
-
-    results = list()
-    def worker():
-        while True:
-            (url, depth) = url_queue.get()
-            results.extend(discover_urls(url))
-            print_urls(results, depth, threading.get_ident())
-            url_queue.task_done()
-
-    for _ in range(MAX_THREADS):
-        threading.Thread(target=worker, daemon=True).start()
-
-    depth = 0
-    while urls and depth < MAX_DEPTH:
-        for _ in urls:
-            url = urls.pop()
-            url_queue.put((url, depth))
-
-        # wait for the threads we have running to finish their work and
-        # extend the urls we are going to hit next.
+        # final reap in case there are still yet more URLs,
+        # but we've reached max depth
         url_queue.join()
-        urls.extend(results)
-
-        # reset results and increment the depth
-        results = []
-        depth += 1
-
-    url_queue.join()
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -142,8 +166,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    VERBOSE = args.verbose
-    MAX_THREADS = args.max_threads
-    MAX_DEPTH = args.max_depth
-
-    multithread_discover_urls([args.url])
+    crawler = Crawler(args.max_threads, args.max_depth, args.verbose)
+    crawler.multithread_discover_urls([args.url])
