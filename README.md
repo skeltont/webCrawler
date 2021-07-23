@@ -35,3 +35,8 @@ all options can be used at the same time, i.e.
 ```
 /path/to/your/python3.8 crawler.py --verbose --max_depth 3 --max_threads 3 <URL>
 ```
+
+# Testing
+```
+/path/to/your/python3.8 tests.py
+```
