@@ -46,24 +46,24 @@ class Crawler:
         self.urls = list()
         self.visited_pages = defaultdict(bool)
 
-    def print_url(self, url, depth=0, ident=None):
+    def print_urls(self, parent_url, child_urls, ident=None):
         '''write the urls we've found in the neatest way possible
 
         Params:
-            urls ([str]): the URL specified to navigate to.
+            parent_url [str]: the URL specified to navigate to.
+            child_urls ([str]): the URLs found on the page that was scraped.
+            ident (str): the identifier of the thread
         '''
 
+        str_fmt = f"{ident}: " if ident is not None and self.verbose else ""
+        str_fmt = str_fmt + "{url}"
 
-        if self.verbose:
-            # log the identifier of the thread to prove that multiple threads
-            # are doing work.
-            print("\t"*depth, ident, url)
-            return
-
-        print("\t"*depth, url)
+        print(str_fmt.format(url=parent_url))
+        for url in child_urls:
+            print("\t", str_fmt.format(url=url))
 
 
-    def discover_urls(self, url, depth=0):
+    def discover_urls(self, url):
         '''navigate to a specified page and collect all of the links found
         within
 
@@ -102,7 +102,8 @@ class Crawler:
             # it so we maybe can avoid some loops.
             links.append(potential_link)
             self.visited_pages[potential_link] = True
-            self.print_url(potential_link, depth, threading.get_ident())
+
+        self.print_urls(url, links, threading.get_ident())
 
         return links
 
@@ -126,8 +127,8 @@ class Crawler:
         # all threads.
         def worker():
             while True:
-                (url, depth) = url_queue.get()
-                results.extend(self.discover_urls(url, depth))
+                url = url_queue.get()
+                results.extend(self.discover_urls(url))
                 url_queue.task_done()
 
         # spin up a number of threads equal to user input or default max_threads
@@ -137,9 +138,10 @@ class Crawler:
         # while urls is populated or the max_depth hasn't been reached
         depth = 0
         while urls and depth < self.max_depth:
-            for _ in urls:
+            # drain the list of urls into our queue
+            while urls:
                 url = urls.pop()
-                url_queue.put((url, depth))
+                url_queue.put((url))
 
             # wait for the threads we have running to finish their work and
             # extend the urls we are going to hit next.
