@@ -42,6 +42,7 @@ class Crawler:
         self.max_threads = max_threads
         self.max_depth = max_depth
         self.verbose = verbose
+        self.print_lock = threading.Lock()
 
         self.urls = list()
         self.visited_pages = defaultdict(bool)
@@ -58,9 +59,10 @@ class Crawler:
         str_fmt = f"{ident}: " if ident is not None and self.verbose else ""
         str_fmt = str_fmt + "{url}"
 
-        print(str_fmt.format(url=parent_url))
-        for url in child_urls:
-            print("\t", str_fmt.format(url=url))
+        with self.print_lock:
+            print(str_fmt.format(url=parent_url))
+            for url in child_urls:
+                print("\t", str_fmt.format(url=url))
 
 
     def discover_urls(self, url):
@@ -89,11 +91,9 @@ class Crawler:
         # make sure we haven't seen it before and validate it's structure.
         links = list()
         for link in soup.find_all('a'):
-            try:
-                potential_link = link.get('href')
-                if self.visited_pages[potential_link]:
-                    continue
+            potential_link = link.get('href')
 
+            try:
                 validate_url(potential_link)
             except CrawlerURLError as err:
                 continue
@@ -101,7 +101,6 @@ class Crawler:
             # add to our list of urls to parse and keep track that we've seen
             # it so we maybe can avoid some loops.
             links.append(potential_link)
-            self.visited_pages[potential_link] = True
 
         self.print_urls(url, links, threading.get_ident())
 
@@ -141,7 +140,9 @@ class Crawler:
             # drain the list of urls into our queue
             while urls:
                 url = urls.pop()
-                url_queue.put((url))
+                if not self.visited_pages[url]:
+                    self.visited_pages[url] = True
+                    url_queue.put((url))
 
             # wait for the threads we have running to finish their work and
             # extend the urls we are going to hit next.
